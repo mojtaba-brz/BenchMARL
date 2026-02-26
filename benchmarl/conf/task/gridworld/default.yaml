@@ -1,0 +1,9 @@
+# Default configuration for GridSpray task
+defaults:
+  - gridspray_config_schema
+
+grid_size: 10
+num_agents: 4
+spray_capacity: 300
+max_steps: 100
+coverage_size: 1
