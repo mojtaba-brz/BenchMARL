@@ -1,10 +1,9 @@
 import torch
 from torchrl.envs import EnvBase
-from torchrl.data import BoundedTensorSpec, CompositeSpec, UnboundedContinuousTensorSpec
-from torchrl.envs.utils import make_composite_from_td
+from torchrl.data import Composite
 from tensordict import TensorDict
 from tensordict.tensordict import TensorDictBase
-from typing import Any, Optional, Tuple, Dict
+from typing import Optional, Dict, List
 import numpy as np
 import gymnasium as gym
 
@@ -19,11 +18,16 @@ class TorchGridSprayWrapper(EnvBase):
         device: str = "cpu",
         seed: Optional[int] = None
     ):
-        super().__init__(device=device)
+        # Set batch_size to empty list for single environment
+        super().__init__(device=device, batch_size=[])
         self.base_env = base_env
         self.num_agents = num_agents
         
-        # Get observation and action specs from base environment
+        # Get observation shape from base env
+        dummy_obs = self.base_env._get_observation()
+        self.obs_shape = dummy_obs[0].shape
+        
+        # Make specs
         self._make_specs()
         
         if seed is not None:
@@ -32,75 +36,86 @@ class TorchGridSprayWrapper(EnvBase):
     def _make_specs(self):
         """Create the environment specs"""
         
-        # Get observation shape from base env
-        dummy_obs = self.base_env._get_observation()
-        obs_shape = dummy_obs[0].shape  # Shape of individual agent observation
+        # Create a simple placeholder spec class
+        class PlaceholderSpec:
+            def __init__(self, shape, dtype, device):
+                self.shape = shape
+                self.dtype = dtype
+                self.device = device
+                self.space = None
+            
+            def __repr__(self):
+                return f"PlaceholderSpec(shape={self.shape}, dtype={self.dtype})"
         
-        # Observation spec (one per agent)
-        observation_spec = CompositeSpec({
-            f"agent_{i}": BoundedTensorSpec(
-                low=0,
-                high=2,
-                shape=obs_shape,
+        # Create the observation spec using Composite with placeholder specs
+        observation_dict = {}
+        for i in range(self.num_agents):
+            observation_dict[f"agent_{i}"] = PlaceholderSpec(
+                shape=self.obs_shape,
                 dtype=torch.float32,
                 device=self.device
-            ) for i in range(self.num_agents)
-        })
+            )
+        self.observation_spec = Composite(**observation_dict)
         
         # Global state spec (for critics)
-        state = self.base_env.get_state()
-        state_spec = BoundedTensorSpec(
-            low=0,
-            high=2,
-            shape=state.shape,
+        dummy_state = self.base_env.get_state()
+        self.state_spec = PlaceholderSpec(
+            shape=dummy_state.shape,
             dtype=torch.float32,
             device=self.device
         )
         
-        # Action spec (discrete)
-        action_spec = CompositeSpec({
-            f"agent_{i}": BoundedTensorSpec(
-                low=0,
-                high=4,
+        # Action spec
+        action_dict = {}
+        for i in range(self.num_agents):
+            action_dict[f"agent_{i}"] = PlaceholderSpec(
                 shape=(1,),
                 dtype=torch.int64,
                 device=self.device
-            ) for i in range(self.num_agents)
-        })
+            )
+        self.action_spec = Composite(**action_dict)
+        
+        # Action mask spec
+        action_mask_dict = {}
+        for i in range(self.num_agents):
+            action_mask_dict[f"agent_{i}"] = PlaceholderSpec(
+                shape=(5,),
+                dtype=torch.bool,
+                device=self.device
+            )
+        self.action_mask_spec = Composite(**action_mask_dict)
         
         # Reward spec (one per agent)
-        reward_spec = CompositeSpec({
-            f"agent_{i}": UnboundedContinuousTensorSpec(
+        reward_dict = {}
+        for i in range(self.num_agents):
+            reward_dict[f"agent_{i}"] = PlaceholderSpec(
                 shape=(1,),
                 dtype=torch.float32,
                 device=self.device
-            ) for i in range(self.num_agents)
-        })
+            )
+        self.reward_spec = Composite(**reward_dict)
         
         # Done spec
-        done_spec = CompositeSpec({
-            "done": BoundedTensorSpec(
+        self.done_spec = Composite(
+            done=PlaceholderSpec(
                 shape=(1,),
                 dtype=torch.bool,
                 device=self.device
             ),
-            "terminated": BoundedTensorSpec(
+            terminated=PlaceholderSpec(
                 shape=(1,),
                 dtype=torch.bool,
                 device=self.device
             ),
-            "truncated": BoundedTensorSpec(
+            truncated=PlaceholderSpec(
                 shape=(1,),
                 dtype=torch.bool,
                 device=self.device
             )
-        })
+        )
         
-        self.observation_spec = observation_spec
-        self.state_spec = state_spec
-        self.action_spec = action_spec
-        self.reward_spec = reward_spec
-        self.done_spec = done_spec
+        # Info spec
+        self.info_spec = Composite()
     
     def _reset(self, tensordict: Optional[TensorDictBase] = None, **kwargs) -> TensorDictBase:
         """Reset the environment"""
@@ -108,30 +123,31 @@ class TorchGridSprayWrapper(EnvBase):
         # Reset base environment
         obs, info = self.base_env.reset()
         
-        # Convert observations to tensor
-        obs_tensors = {}
-        for i, agent_obs in enumerate(obs):
-            obs_tensors[f"agent_{i}"] = torch.tensor(
-                agent_obs, dtype=torch.float32, device=self.device
-            )
-        
-        # Get global state
-        state = torch.tensor(
-            self.base_env.get_state(), dtype=torch.float32, device=self.device
-        )
-        
         # Create output tensordict
-        out = TensorDict(
-            {
-                **obs_tensors,
-                "state": state,
-                "done": torch.zeros((1,), dtype=torch.bool, device=self.device),
-                "terminated": torch.zeros((1,), dtype=torch.bool, device=self.device),
-                "truncated": torch.zeros((1,), dtype=torch.bool, device=self.device),
-            },
-            batch_size=[],
-            device=self.device,
-        )
+        out = TensorDict({}, batch_size=self.batch_size, device=self.device)
+        
+        # Add observations
+        for i, agent_obs in enumerate(obs):
+            out.set(f"agent_{i}", torch.tensor(
+                agent_obs, dtype=torch.float32, device=self.device
+            ))
+        
+        # Add global state
+        out.set("state", torch.tensor(
+            self.base_env.get_state(), dtype=torch.float32, device=self.device
+        ))
+        
+        # Add done flags
+        out.set("done", torch.zeros((1,), dtype=torch.bool, device=self.device))
+        out.set("terminated", torch.zeros((1,), dtype=torch.bool, device=self.device))
+        out.set("truncated", torch.zeros((1,), dtype=torch.bool, device=self.device))
+        
+        # Add action masks (all actions available by default)
+        for i in range(self.num_agents):
+            out.set(f"action_mask_{i}", torch.ones((5,), dtype=torch.bool, device=self.device))
+        
+        # Add empty info
+        out.set("info", TensorDict({}, batch_size=self.batch_size, device=self.device))
         
         return out
     
@@ -142,53 +158,73 @@ class TorchGridSprayWrapper(EnvBase):
         actions = []
         for i in range(self.num_agents):
             action_key = f"agent_{i}"
-            if action_key in tensordict:
+            if action_key in tensordict.keys():
                 action = tensordict.get(action_key).item()
             else:
                 action = 4  # Default to stay if action missing
             actions.append(action)
         
         # Step base environment
-        obs, rewards, done, truncated, info = self.base_env.step(actions)
-        
-        # Convert observations to tensors
-        obs_tensors = {}
-        for i, agent_obs in enumerate(obs):
-            obs_tensors[f"agent_{i}"] = torch.tensor(
-                agent_obs, dtype=torch.float32, device=self.device
-            )
-        
-        # Convert rewards to tensors
-        reward_tensors = {}
-        for i, reward in enumerate(rewards):
-            reward_tensors[f"agent_{i}"] = torch.tensor(
-                [reward], dtype=torch.float32, device=self.device
-            )
-        
-        # Get global state
-        state = torch.tensor(
-            self.base_env.get_state(), dtype=torch.float32, device=self.device
-        )
+        obs, rewards, terminated, truncated, info = self.base_env.step(actions)
+        done = terminated or truncated
         
         # Create output tensordict
-        out = TensorDict(
-            {
-                **obs_tensors,
-                **reward_tensors,
-                "state": state,
-                "done": torch.tensor([done or truncated], dtype=torch.bool, device=self.device),
-                "terminated": torch.tensor([done], dtype=torch.bool, device=self.device),
-                "truncated": torch.tensor([truncated], dtype=torch.bool, device=self.device),
-            },
-            batch_size=[],
-            device=self.device,
-        )
+        out = TensorDict({}, batch_size=self.batch_size, device=self.device)
+        
+        # Add next observations
+        for i, agent_obs in enumerate(obs):
+            out.set(f"agent_{i}", torch.tensor(
+                agent_obs, dtype=torch.float32, device=self.device
+            ))
+        
+        # Add rewards
+        for i, reward in enumerate(rewards):
+            out.set(f"reward_{i}", torch.tensor(
+                [reward], dtype=torch.float32, device=self.device
+            ))
+        
+        # Add global state
+        out.set("state", torch.tensor(
+            self.base_env.get_state(), dtype=torch.float32, device=self.device
+        ))
+        
+        # Add done flags
+        out.set("done", torch.tensor([done], dtype=torch.bool, device=self.device))
+        out.set("terminated", torch.tensor([terminated], dtype=torch.bool, device=self.device))
+        out.set("truncated", torch.tensor([truncated], dtype=torch.bool, device=self.device))
+        
+        # Add action masks (all actions still available)
+        for i in range(self.num_agents):
+            out.set(f"action_mask_{i}", torch.ones((5,), dtype=torch.bool, device=self.device))
+        
+        # Add info
+        out.set("info", TensorDict({}, batch_size=self.batch_size, device=self.device))
         
         return out
     
     def set_seed(self, seed: int):
         """Set the random seed"""
-        super().set_seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         self.base_env.reset(seed=seed)
+    
+    def _set_seed(self, seed: Optional[int]):
+        """Internal method for setting seed"""
+        if seed is not None:
+            self.set_seed(seed)
+    
+    # Additional required properties for BenchMARL
+    @property
+    def group_map(self) -> Dict[str, List[int]]:
+        """Return the group map for the environment"""
+        return {"agents": list(range(self.num_agents))}
+    
+    @property
+    def has_render(self) -> bool:
+        """Return whether the environment has rendering"""
+        return False
+    
+    @property
+    def max_steps(self) -> int:
+        """Return the maximum number of steps"""
+        return self.base_env.max_steps
