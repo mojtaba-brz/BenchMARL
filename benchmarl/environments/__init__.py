@@ -12,10 +12,10 @@ from .pettingzoo.common import PettingZooClass, PettingZooTask
 from .smacv2.common import Smacv2Class, Smacv2Task
 from .vmas.common import VmasClass, VmasTask
 from .gridworld.common import GridSprayTask
-
+from .game_theory_game.common import TwoPlayerGameTheoryClass, TwoPlayerGameTheoryTask
 # The enum classes for the environments available.
 # This is the only object in this file you need to modify when adding a new environment.
-tasks = [VmasTask, Smacv2Task, PettingZooTask, MeltingPotTask, MAgentTask, GridSprayTask]
+tasks = [VmasTask, Smacv2Task, PettingZooTask, MeltingPotTask, MAgentTask, GridSprayTask, TwoPlayerGameTheoryTask]
 
 # This is a registry mapping "envname/task_name" to the EnvNameTask.TASK_NAME enum
 # It is used by automatically load task enums from yaml files.
