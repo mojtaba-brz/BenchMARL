@@ -1,6 +1,6 @@
 import torch
 from torchrl.envs import EnvBase
-from torchrl.data import Composite
+from torchrl.data import Composite, Bounded
 from tensordict import TensorDict
 from tensordict.tensordict import TensorDictBase
 from typing import Optional, Dict, List
@@ -8,8 +8,8 @@ import numpy as np
 import gymnasium as gym
 
 
-class TorchGridSprayWrapper(EnvBase):
-    """TorchRL wrapper for GridSprayEnv"""
+class TorchRLGridWorldWrapper(EnvBase):
+    """TorchRL wrapper for a general GridWorldEnv"""
     
     def __init__(
         self,
@@ -19,9 +19,10 @@ class TorchGridSprayWrapper(EnvBase):
         seed: Optional[int] = None
     ):
         # Set batch_size to empty list for single environment
-        super().__init__(device=device, batch_size=[])
+        super().__init__(device=device, batch_size=())
         self.base_env = base_env
         self.num_agents = num_agents
+        self.env_device = device
         
         # Get observation shape from base env
         dummy_obs = self.base_env._get_observation()
@@ -58,12 +59,7 @@ class TorchGridSprayWrapper(EnvBase):
         self.observation_spec = Composite(**observation_dict)
         
         # Global state spec (for critics)
-        dummy_state = self.base_env.get_state()
-        self.state_spec = PlaceholderSpec(
-            shape=dummy_state.shape,
-            dtype=torch.float32,
-            device=self.device
-        )
+        self.state_spec = self.observation_spec.clone()
         
         # Action spec
         action_dict = {}
@@ -97,21 +93,24 @@ class TorchGridSprayWrapper(EnvBase):
         
         # Done spec
         self.done_spec = Composite(
-            done=PlaceholderSpec(
-                shape=(1,),
-                dtype=torch.bool,
-                device=self.device
+            done=Bounded(
+                low=0, high=1,
+                shape=torch.Size((1,)),
+                device=self.env_device,
+                dtype=torch.bool
             ),
-            terminated=PlaceholderSpec(
-                shape=(1,),
-                dtype=torch.bool,
-                device=self.device
+            terminated=Bounded(
+                low=0, high=1,
+                shape=torch.Size((1,)),
+                device=self.env_device,
+                dtype=torch.bool
             ),
-            truncated=PlaceholderSpec(
-                shape=(1,),
-                dtype=torch.bool,
-                device=self.device
-            )
+            truncated=Bounded(
+                low=0, high=1,
+                shape=torch.Size((1,)),
+                device=self.env_device,
+                dtype=torch.bool
+            ),
         )
         
         # Info spec

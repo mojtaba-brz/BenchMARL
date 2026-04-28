@@ -15,51 +15,22 @@ from multiagentcoverage.envs.grid_spray_env import GridSprayEnv
 from multiagentcoverage.envs.rewards import return_home_reward_fn
 from multiagentcoverage.envs.states import state_fn
 from benchmarl.utils import DEVICE_TYPING
-from benchmarl.environments.gridworld.torch_wrapper import TorchGridSprayWrapper
+from benchmarl.environments.gridworld.torch_wrapper import TorchRLGridWorldWrapper
 from torchrl.data import Composite, TensorSpec
 
+from multiagentcoverage.envs import grid_cpp_env_v0
 
-@dataclass
-class GridSprayConfig:
-    """Configuration for GridSpray environment"""
-    grid_size: int = 10
-    n_agents: int = 4
-    spray_capacity: int = 300
-    max_steps: int = 100
-    coverage_size: int = 1
-    
-    # This will catch any extra arguments
-    def __init__(self, **kwargs):
-        # Set default values
-        self.grid_size = kwargs.get('grid_size', 10)
-        self.n_agents = kwargs.get('n_agents', kwargs.get('num_agents', 4))
-        self.spray_capacity = kwargs.get('spray_capacity', 300)
-        self.max_steps = kwargs.get('max_steps', 100)
-        self.coverage_size = kwargs.get('coverage_size', 1)
-        
-        # Store any extra args for debugging but don't use them
-        self.extra_args = {k: v for k, v in kwargs.items() 
-                          if k not in ['grid_size', 'n_agents', 'num_agents', 
-                                      'spray_capacity', 'max_steps', 'coverage_size']}
-        
-        # Print warning about extra args if in debug mode
-        if self.extra_args:
-            print(f"Warning: GridSprayConfig ignoring extra arguments: {self.extra_args}")
-
-
-class GridSprayTask(Task):
-    """GridSpray environment task for BenchMARL"""
-    
-    # Define your tasks/variants
-    DEFAULT = None  # Will be loaded from YAML
+class GridWorldCPPTask(Task):
+    DEFAULT = None
     SMALL_GRID = None
+    CUSTOM_GRID = None
     
     @staticmethod
     def associated_class():
-        return GridSprayClass
+        return GridWorldCPPClass
 
 
-class GridSprayClass(TaskClass):
+class GridWorldCPPClass(TaskClass):
     @staticmethod
     def env_name() -> str:
         # The name of the environment in the benchmarl/conf/task folder
@@ -71,11 +42,12 @@ class GridSprayClass(TaskClass):
         continuous_actions: bool,
         seed: int | None,
         device: DEVICE_TYPING,
+        **kwargs
     ) -> Callable[[], EnvBase]:
         """Returns a function that creates the environment"""
         
         # Create config from all YAML parameters
-        config = GridSprayConfig(**self.config)
+        config = self.config
         
         def env_fun():
             # Create base gym environment
@@ -92,7 +64,7 @@ class GridSprayClass(TaskClass):
             )
             
             # Wrap in TorchRL environment
-            env = TorchGridSprayWrapper(
+            env = TorchRLGridWorldWrapper(
                 base_env=base_env,
                 num_agents=config.n_agents,
                 device=device
