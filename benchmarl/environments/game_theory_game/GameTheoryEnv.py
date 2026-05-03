@@ -104,7 +104,7 @@ class TwoPlayerGameTheoryEnv(EnvBase):
         # For this, ``EnvBase`` expects some state_spec to be available
         self.state_spec = self.observation_spec.clone()
         
-        # Reward spec for two agents
+        # Reward spec
         self.reward_spec = Composite(
             agents=Composite(
                 reward=UnboundedContinuous(

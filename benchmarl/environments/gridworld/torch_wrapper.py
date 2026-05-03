@@ -1,32 +1,31 @@
 import torch
 from torchrl.envs import EnvBase
-from torchrl.data import Composite, Bounded
+from torchrl.data import Composite, Bounded, UnboundedContinuous
+from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
 from tensordict.tensordict import TensorDictBase
+
 from typing import Optional, Dict, List
 import numpy as np
 import gymnasium as gym
 
+from multiagentcoverage.envs.grid_cpp_env_v0 import GridCPPSimpleEnv
+from multiagentcoverage.envs.rewards import reward_cpp_simple
+from multiagentcoverage.envs.states import state_fn, state_with_map
 
 class TorchRLGridWorldWrapper(EnvBase):
-    """TorchRL wrapper for a general GridWorldEnv"""
-    
+    """TorchRL wrapper for a general GridWorldEnv"""    
     def __init__(
         self,
-        base_env: gym.Env,
-        num_agents: int,
+        base_env: GridCPPSimpleEnv,
         device: str = "cpu",
         seed: Optional[int] = None
     ):
         # Set batch_size to empty list for single environment
         super().__init__(device=device, batch_size=())
         self.base_env = base_env
-        self.num_agents = num_agents
+        self.n_agents = base_env.n_agents
         self.env_device = device
-        
-        # Get observation shape from base env
-        dummy_obs = self.base_env._get_observation()
-        self.obs_shape = dummy_obs[0].shape
         
         # Make specs
         self._make_specs()
@@ -49,47 +48,48 @@ class TorchRLGridWorldWrapper(EnvBase):
                 return f"PlaceholderSpec(shape={self.shape}, dtype={self.dtype})"
         
         # Create the observation spec using Composite with placeholder specs
-        observation_dict = {}
-        for i in range(self.num_agents):
-            observation_dict[f"agent_{i}"] = PlaceholderSpec(
-                shape=self.obs_shape,
-                dtype=torch.float32,
-                device=self.device
+        state_spec = self.base_env.observation_space[0]
+        self.observation_spec = Composite(
+            agents=Composite(
+                state=Bounded(
+                    low=state_spec.low[0],
+                    high=state_spec.high[0],
+                    shape=(self.n_agents,) + state_spec.shape,
+                    dtype=torch.float32,
+                    device=self.device
+                ),
+                shape=(self.n_agents,)
             )
-        self.observation_spec = Composite(**observation_dict)
+        )
         
         # Global state spec (for critics)
         self.state_spec = self.observation_spec.clone()
         
         # Action spec
-        action_dict = {}
-        for i in range(self.num_agents):
-            action_dict[f"agent_{i}"] = PlaceholderSpec(
-                shape=(1,),
-                dtype=torch.int64,
-                device=self.device
+        num_of_actions = self.base_env.action_space[0].n
+        self.action_spec = Composite(
+            agents=Composite(
+                action=Bounded(
+                    low = 0,
+                    high = num_of_actions-1,
+                    shape = (self.n_agents,),
+                    dtype = torch.int64, # For compatiblity
+                ),
+                shape = (self.n_agents,)
             )
-        self.action_spec = Composite(**action_dict)
+        )
         
-        # Action mask spec
-        action_mask_dict = {}
-        for i in range(self.num_agents):
-            action_mask_dict[f"agent_{i}"] = PlaceholderSpec(
-                shape=(5,),
-                dtype=torch.bool,
-                device=self.device
+        # Reward spec 
+        self.reward_spec = Composite(
+            agents=Composite(
+                reward=UnboundedContinuous(
+                    shape=torch.Size((self.n_agents, 1)),  # Removed extra dimension
+                    device=self.env_device,
+                    dtype=torch.float
+                ),
+                shape=torch.Size((self.n_agents,))
             )
-        self.action_mask_spec = Composite(**action_mask_dict)
-        
-        # Reward spec (one per agent)
-        reward_dict = {}
-        for i in range(self.num_agents):
-            reward_dict[f"agent_{i}"] = PlaceholderSpec(
-                shape=(1,),
-                dtype=torch.float32,
-                device=self.device
-            )
-        self.reward_spec = Composite(**reward_dict)
+        )
         
         # Done spec
         self.done_spec = Composite(
@@ -112,100 +112,59 @@ class TorchRLGridWorldWrapper(EnvBase):
                 dtype=torch.bool
             ),
         )
-        
-        # Info spec
-        self.info_spec = Composite()
     
     def _reset(self, tensordict: Optional[TensorDictBase] = None, **kwargs) -> TensorDictBase:
         """Reset the environment"""
         
         # Reset base environment
         obs, info = self.base_env.reset()
-        
-        # Create output tensordict
-        out = TensorDict({}, batch_size=self.batch_size, device=self.device)
-        
-        # Add observations
-        for i, agent_obs in enumerate(obs):
-            out.set(f"agent_{i}", torch.tensor(
-                agent_obs, dtype=torch.float32, device=self.device
-            ))
-        
-        # Add global state
-        out.set("state", torch.tensor(
-            self.base_env.get_state(), dtype=torch.float32, device=self.device
-        ))
-        
-        # Add done flags
-        out.set("done", torch.zeros((1,), dtype=torch.bool, device=self.device))
-        out.set("terminated", torch.zeros((1,), dtype=torch.bool, device=self.device))
-        out.set("truncated", torch.zeros((1,), dtype=torch.bool, device=self.device))
-        
-        # Add action masks (all actions available by default)
-        for i in range(self.num_agents):
-            out.set(f"action_mask_{i}", torch.ones((5,), dtype=torch.bool, device=self.device))
-        
-        # Add empty info
-        out.set("info", TensorDict({}, batch_size=self.batch_size, device=self.device))
+        initial_state = torch.asarray(obs, dtype=torch.float32, device=self.device)
+        out = TensorDict(
+            {
+                "agents": TensorDict(
+                    {
+                        "state": initial_state,
+                    },
+                    batch_size=torch.Size([self.n_agents]),
+                    device=self.device,
+                ),
+                "done": torch.zeros(1, dtype=torch.bool, device=self.device),
+                "terminated": torch.zeros(1, dtype=torch.bool, device=self.device),
+                "truncated": torch.zeros(1, dtype=torch.bool, device=self.device),
+            },
+            batch_size=torch.Size([]),
+            device=self.device,
+        )
         
         return out
     
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Take a step in the environment"""
         
-        # Extract actions
-        actions = []
-        for i in range(self.num_agents):
-            action_key = f"agent_{i}"
-            if action_key in tensordict.keys():
-                action = tensordict.get(action_key).item()
-            else:
-                action = 4  # Default to stay if action missing
-            actions.append(action)
-        
         # Step base environment
-        obs, rewards, terminated, truncated, info = self.base_env.step(actions)
-        done = terminated or truncated
+        actions = tensordict['agents', 'action'].cpu().numpy()
+        obs, rewards, done, _, _ = self.base_env.step(actions)
         
-        # Create output tensordict
-        out = TensorDict({}, batch_size=self.batch_size, device=self.device)
-        
-        # Add next observations
-        for i, agent_obs in enumerate(obs):
-            out.set(f"agent_{i}", torch.tensor(
-                agent_obs, dtype=torch.float32, device=self.device
-            ))
-        
-        # Add rewards
-        for i, reward in enumerate(rewards):
-            out.set(f"reward_{i}", torch.tensor(
-                [reward], dtype=torch.float32, device=self.device
-            ))
-        
-        # Add global state
-        out.set("state", torch.tensor(
-            self.base_env.get_state(), dtype=torch.float32, device=self.device
-        ))
-        
-        # Add done flags
-        out.set("done", torch.tensor([done], dtype=torch.bool, device=self.device))
-        out.set("terminated", torch.tensor([terminated], dtype=torch.bool, device=self.device))
-        out.set("truncated", torch.tensor([truncated], dtype=torch.bool, device=self.device))
-        
-        # Add action masks (all actions still available)
-        for i in range(self.num_agents):
-            out.set(f"action_mask_{i}", torch.ones((5,), dtype=torch.bool, device=self.device))
-        
-        # Add info
-        out.set("info", TensorDict({}, batch_size=self.batch_size, device=self.device))
+        state = torch.asarray(obs, dtype=torch.float32, device=self.device)
+        out = TensorDict(
+            {
+                "agents": TensorDict(
+                    {
+                        "state": state,
+                        "reward": torch.asarray(rewards, dtype=torch.float32, device=self.device).unsqueeze(-1),  # Add extra dimension for reward
+                    },
+                    batch_size=torch.Size([self.n_agents]),
+                    device=self.device,
+                ),
+                "done": torch.asarray([done], dtype=torch.bool, device=self.device),
+                "terminated": torch.zeros(1, dtype=torch.bool, device=self.device),
+                "truncated": torch.zeros(1, dtype=torch.bool, device=self.device),
+            },
+            batch_size=torch.Size([]),
+            device=self.device,
+        )
         
         return out
-    
-    def set_seed(self, seed: int):
-        """Set the random seed"""
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        self.base_env.reset(seed=seed)
     
     def _set_seed(self, seed: Optional[int]):
         """Internal method for setting seed"""
@@ -216,7 +175,7 @@ class TorchRLGridWorldWrapper(EnvBase):
     @property
     def group_map(self) -> Dict[str, List[int]]:
         """Return the group map for the environment"""
-        return {"agents": list(range(self.num_agents))}
+        return {"agents": list(range(self.n_agents))}
     
     @property
     def has_render(self) -> bool:
@@ -227,3 +186,15 @@ class TorchRLGridWorldWrapper(EnvBase):
     def max_steps(self) -> int:
         """Return the maximum number of steps"""
         return self.base_env.max_steps
+
+def test_environment(env:TorchRLGridWorldWrapper):
+    pass
+
+if __name__ == "__main__":
+    base_env = GridCPPSimpleEnv(grid_size=10, num_agents=5, spray_capacity=700, max_steps=100, render=True,
+                                state_fn=state_fn, reward_fn=reward_cpp_simple)
+    env = TorchRLGridWorldWrapper(base_env)
+    check_env_specs(env)
+    
+    # Test basic functionality
+    test_environment(env)
