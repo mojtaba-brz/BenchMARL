@@ -17,14 +17,15 @@ class TorchRLGridWorldWrapper(EnvBase):
     """TorchRL wrapper for a general GridWorldEnv"""    
     def __init__(
         self,
-        base_env: GridCPPSimpleEnv,
+        base_env: gym.Env,
+        n_agents: int,
         device: str = "cpu",
         seed: Optional[int] = None
     ):
         # Set batch_size to empty list for single environment
         super().__init__(device=device, batch_size=())
         self.base_env = base_env
-        self.n_agents = base_env.n_agents
+        self.n_agents = n_agents
         self.env_device = device
         
         # Make specs
@@ -34,27 +35,17 @@ class TorchRLGridWorldWrapper(EnvBase):
             self.set_seed(seed)
     
     def _make_specs(self):
-        """Create the environment specs"""
-        
-        # Create a simple placeholder spec class
-        class PlaceholderSpec:
-            def __init__(self, shape, dtype, device):
-                self.shape = shape
-                self.dtype = dtype
-                self.device = device
-                self.space = None
-            
-            def __repr__(self):
-                return f"PlaceholderSpec(shape={self.shape}, dtype={self.dtype})"
-        
+        """Create the environment specs"""        
         # Create the observation spec using Composite with placeholder specs
+        obs, _ = self.base_env.reset()
+        states = np.array(obs)
         state_spec = self.base_env.observation_space[0]
         self.observation_spec = Composite(
             agents=Composite(
                 state=Bounded(
                     low=state_spec.low[0],
                     high=state_spec.high[0],
-                    shape=(self.n_agents,) + state_spec.shape,
+                    shape=states.shape,
                     dtype=torch.float32,
                     device=self.device
                 ),
@@ -118,7 +109,8 @@ class TorchRLGridWorldWrapper(EnvBase):
         
         # Reset base environment
         obs, info = self.base_env.reset()
-        initial_state = torch.asarray(obs, dtype=torch.float32, device=self.device)
+        initial_state = np.array(obs)
+        initial_state = torch.asarray(initial_state, dtype=torch.float32, device=self.device)
         out = TensorDict(
             {
                 "agents": TensorDict(
@@ -131,9 +123,7 @@ class TorchRLGridWorldWrapper(EnvBase):
                 "done": torch.zeros(1, dtype=torch.bool, device=self.device),
                 "terminated": torch.zeros(1, dtype=torch.bool, device=self.device),
                 "truncated": torch.zeros(1, dtype=torch.bool, device=self.device),
-            },
-            batch_size=torch.Size([]),
-            device=self.device,
+            }
         )
         
         return out
@@ -159,9 +149,7 @@ class TorchRLGridWorldWrapper(EnvBase):
                 "done": torch.asarray([done], dtype=torch.bool, device=self.device),
                 "terminated": torch.zeros(1, dtype=torch.bool, device=self.device),
                 "truncated": torch.zeros(1, dtype=torch.bool, device=self.device),
-            },
-            batch_size=torch.Size([]),
-            device=self.device,
+            }
         )
         
         return out
@@ -191,9 +179,10 @@ def test_environment(env:TorchRLGridWorldWrapper):
     pass
 
 if __name__ == "__main__":
-    base_env = GridCPPSimpleEnv(grid_size=10, num_agents=5, spray_capacity=700, max_steps=100, render=True,
+    n_agents = 5
+    base_env = GridCPPSimpleEnv(grid_size=10, num_agents=n_agents, spray_capacity=700, max_steps=100, render=True,
                                 state_fn=state_fn, reward_fn=reward_cpp_simple)
-    env = TorchRLGridWorldWrapper(base_env)
+    env = TorchRLGridWorldWrapper(base_env, n_agents)
     check_env_specs(env)
     
     # Test basic functionality
