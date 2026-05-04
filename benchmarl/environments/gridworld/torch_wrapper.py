@@ -1,6 +1,6 @@
 import torch
 from torchrl.envs import EnvBase
-from torchrl.data import Composite, Bounded, UnboundedContinuous
+from torchrl.data import Composite, Bounded, UnboundedContinuous, Categorical
 from torchrl.envs.utils import check_env_specs
 from tensordict import TensorDict
 from tensordict.tensordict import TensorDictBase
@@ -60,9 +60,8 @@ class TorchRLGridWorldWrapper(EnvBase):
         num_of_actions = self.base_env.action_space[0].n
         self.action_spec = Composite(
             agents=Composite(
-                action=Bounded(
-                    low = 0,
-                    high = num_of_actions-1,
+                action=Categorical(
+                    n=num_of_actions-1,
                     shape = (self.n_agents,),
                     dtype = torch.int64, # For compatiblity
                 ),
@@ -157,7 +156,8 @@ class TorchRLGridWorldWrapper(EnvBase):
     def _set_seed(self, seed: Optional[int]):
         """Internal method for setting seed"""
         if seed is not None:
-            self.set_seed(seed)
+            torch.manual_seed(seed)
+            np.random.seed(seed)
     
     # Additional required properties for BenchMARL
     @property
@@ -176,14 +176,51 @@ class TorchRLGridWorldWrapper(EnvBase):
         return self.base_env.max_steps
 
 def test_environment(env:TorchRLGridWorldWrapper):
-    pass
+    td = env.reset()
+    reward_sum = 0
+    done = False
+
+    while not done:
+        td = env.rand_action()
+        td = env.step(td)
+
+        rewards = td['next', 'agents', 'reward']
+        reward_sum += rewards.mean()
+        print(f"Rewards: {rewards.transpose(0, 1)}")
+        done = td['next', 'done'][0]
+
+    print("Return: ", reward_sum)
+    env.base_env.close()
+
+def test_env_using_benchmarl():
+    from benchmarl.algorithms import MappoConfig
+    from benchmarl.environments import GridWorldCPPTask
+    from benchmarl.experiment import Experiment, ExperimentConfig
+    from benchmarl.models.mlp import MlpConfig
+
+    experiment_config = ExperimentConfig.get_from_yaml()
+    experiment_config.loggers = ["csv"]  # or ["tensorboard"] or []
+    experiment_config.max_n_iters = 10
+
+    task = GridWorldCPPTask.DEFAULT.get_from_yaml()
+
+    experiment = Experiment(
+    task=task,
+    algorithm_config=MappoConfig.get_from_yaml(),
+    model_config=MlpConfig.get_from_yaml(),
+    critic_model_config=MlpConfig.get_from_yaml(),
+    seed=0,
+    config=experiment_config,
+    )
+    experiment.run()
 
 if __name__ == "__main__":
-    n_agents = 5
-    base_env = GridCPPSimpleEnv(grid_size=10, num_agents=n_agents, spray_capacity=700, max_steps=100, render=True,
-                                state_fn=state_fn, reward_fn=reward_cpp_simple)
-    env = TorchRLGridWorldWrapper(base_env, n_agents)
-    check_env_specs(env)
+    # n_agents = 5
+    # base_env = GridCPPSimpleEnv(grid_size=10, num_agents=n_agents, spray_capacity=700, max_steps=100, render=True,
+    #                             state_fn=state_fn, reward_fn=reward_cpp_simple)
+    # env = TorchRLGridWorldWrapper(base_env, n_agents)
+    # check_env_specs(env)
     
     # Test basic functionality
-    test_environment(env)
+    # test_environment(env)
+    test_env_using_benchmarl()

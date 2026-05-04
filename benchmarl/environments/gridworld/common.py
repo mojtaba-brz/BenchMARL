@@ -12,18 +12,30 @@ import os
 project_path = os.path.expanduser("~/coverage_path_planning_marl")
 sys.path.append(project_path)
 from multiagentcoverage.envs.grid_spray_env import GridSprayEnv
-from multiagentcoverage.envs.rewards import return_home_reward_fn
-from multiagentcoverage.envs.states import state_fn
+from multiagentcoverage.envs.rewards import return_home_reward_fn, reward_cpp_simple
+from multiagentcoverage.envs.states import state_fn, state_with_map
 from benchmarl.utils import DEVICE_TYPING
 from benchmarl.environments.gridworld.torch_wrapper import TorchRLGridWorldWrapper
 from torchrl.data import Composite, TensorSpec
 
 from multiagentcoverage.envs import grid_cpp_env_v0
 
+def get_reward_fn_from_str(name):
+    if name == 'return_home_reward_fn':
+        return return_home_reward_fn
+    else:
+        return reward_cpp_simple
+
+def get_state_fn_from_str(name):
+    if name == 'state_with_map':
+        return state_with_map
+    else:
+        return state_fn
+
+
+
 class GridWorldCPPTask(Task):
     DEFAULT = None
-    SMALL_GRID = None
-    CUSTOM_GRID = None
     
     @staticmethod
     def associated_class():
@@ -49,38 +61,35 @@ class GridWorldCPPClass(TaskClass):
         # Create config from all YAML parameters
         config = self.config
         
+        if config['map_file'] == 'None':
+            config['map_file'] = None
+        config['state_fn'] = get_state_fn_from_str(config['state_fn'])
+        config['reward_fn'] = get_reward_fn_from_str(config['reward_fn'])
+        
         def env_fun():
             # Create base gym environment
             base_env = GridSprayEnv(
                 render=False,  # Disable rendering for training
-                state_fn=state_fn,
-                grid_size=config.grid_size,
-                num_agents=config.n_agents,  # Use n_agents
-                spray_capacity=config.spray_capacity,
-                max_steps=config.max_steps,
-                coverage_size=config.coverage_size,
-                reward_fn=return_home_reward_fn,
-                map_file=None
+                state_fn=config['state_fn'],
+                grid_size=config['grid_size'],
+                num_agents=config['n_agents'],  # Use n_agents
+                spray_capacity=config['spray_capacity'],
+                max_steps=config['max_steps'],
+                coverage_size=config['coverage_size'],
+                reward_fn=config['reward_fn'],
+                map_file=config['map_file']
             )
             
             # Wrap in TorchRL environment
             env = TorchRLGridWorldWrapper(
                 base_env=base_env,
-                num_agents=config.n_agents,
+                n_agents=config['n_agents'],
                 device=device
             )
-            
-            # Apply transformations
-            env = TransformedEnv(env)
-            env.append_transform(self.get_reward_sum_transform(env))
-            for transform in self.get_env_transforms(env):
-                env.append_transform(transform)
             
             # Set device and seed
             env = env.to(device)
             if seed is not None:
-                torch.manual_seed(seed)
-                np.random.seed(seed)
                 env.set_seed(seed)
             
             return env
@@ -115,7 +124,7 @@ class GridWorldCPPClass(TaskClass):
 
     def action_mask_spec(self, env: EnvBase) -> Composite:
         """Return the action mask spec"""
-        return env.action_mask_spec
+        return None
 
     def state_spec(self, env: EnvBase) -> Optional[TensorSpec]:
         """Return the state spec"""
@@ -123,7 +132,7 @@ class GridWorldCPPClass(TaskClass):
 
     def info_spec(self, env: EnvBase) -> Optional[Composite]:
         """Return the info spec"""
-        return env.info_spec
+        return None
 
     def group_map(self, env: EnvBase) -> Dict[str, List[int]]:
         """Return the group map"""
@@ -131,8 +140,8 @@ class GridWorldCPPClass(TaskClass):
 
     def max_steps(self, env: EnvBase) -> int:
         """Return the maximum number of steps"""
-        return env.max_steps
+        return env.base_env.max_steps
 
     def has_render(self, env: EnvBase) -> bool:
         """Return whether the environment can render"""
-        return env.has_render
+        return env.base_env.has_render

@@ -1,7 +1,0 @@
-defaults:
-  - gridspray_config_schema
-  - default
-
-grid_size: 5
-num_agents: 2
-max_steps: 50
