@@ -8,6 +8,6 @@ class TaskConfig:
     spray_capacity: int = MISSING
     max_steps: int = MISSING
     coverage_size: int = MISSING
-    reward_fn: Any = MISSING
-    state_fn: Any = MISSING
+    reward_fn_name: Any = MISSING
+    state_fn_name: Any = MISSING
     map_file: str|None = None

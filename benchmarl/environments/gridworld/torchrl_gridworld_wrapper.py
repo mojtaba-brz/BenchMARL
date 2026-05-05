@@ -200,9 +200,11 @@ def test_env_using_benchmarl():
 
     experiment_config = ExperimentConfig.get_from_yaml()
     experiment_config.loggers = ["csv"]  # or ["tensorboard"] or []
-    experiment_config.max_n_iters = 10
+    experiment_config.max_n_iters = 50
 
     task = GridWorldCPPTask.DEFAULT.get_from_yaml()
+    task.config['grid_size'] = 3
+    task.config['n_agents']  = 3
 
     experiment = Experiment(
     task=task,

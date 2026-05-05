@@ -15,7 +15,7 @@ from multiagentcoverage.envs.grid_spray_env import GridSprayEnv
 from multiagentcoverage.envs.rewards import return_home_reward_fn, reward_cpp_simple
 from multiagentcoverage.envs.states import state_fn, state_with_map
 from benchmarl.utils import DEVICE_TYPING
-from benchmarl.environments.gridworld.torch_wrapper import TorchRLGridWorldWrapper
+from BenchMARL.benchmarl.environments.gridworld.torchrl_gridworld_wrapper import TorchRLGridWorldWrapper
 from torchrl.data import Composite, TensorSpec
 
 from multiagentcoverage.envs import grid_cpp_env_v0
@@ -63,8 +63,8 @@ class GridWorldCPPClass(TaskClass):
         
         if config['map_file'] == 'None':
             config['map_file'] = None
-        config['state_fn'] = get_state_fn_from_str(config['state_fn'])
-        config['reward_fn'] = get_reward_fn_from_str(config['reward_fn'])
+        config['state_fn'] = get_state_fn_from_str(config['state_fn_name'])
+        config['reward_fn'] = get_reward_fn_from_str(config['reward_fn_name'])
         
         def env_fun():
             # Create base gym environment
@@ -128,7 +128,7 @@ class GridWorldCPPClass(TaskClass):
 
     def state_spec(self, env: EnvBase) -> Optional[TensorSpec]:
         """Return the state spec"""
-        return env.state_spec
+        return None
 
     def info_spec(self, env: EnvBase) -> Optional[Composite]:
         """Return the info spec"""

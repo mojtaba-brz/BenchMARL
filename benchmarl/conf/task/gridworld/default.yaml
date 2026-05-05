@@ -6,6 +6,6 @@ n_agents: 5
 spray_capacity: 500
 max_steps: 100
 coverage_size: 1
-reward_fn: return_home_reward_fn
-state_fn: state_fn
+reward_fn_name: return_home_reward_fn
+state_fn_name: state_fn
 map_file: None
