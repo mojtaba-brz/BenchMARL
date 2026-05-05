@@ -217,12 +217,14 @@ def test_env_using_benchmarl():
     experiment.run()
 
 if __name__ == "__main__":
-    # n_agents = 5
-    # base_env = GridCPPSimpleEnv(grid_size=10, num_agents=n_agents, spray_capacity=700, max_steps=100, render=True,
-    #                             state_fn=state_fn, reward_fn=reward_cpp_simple)
-    # env = TorchRLGridWorldWrapper(base_env, n_agents)
-    # check_env_specs(env)
+    n_agents = 5
+    base_env = GridCPPSimpleEnv(grid_size=10, num_agents=n_agents, spray_capacity=700, max_steps=100, render=True,
+                                state_fn=state_fn, reward_fn=reward_cpp_simple)
+    env = TorchRLGridWorldWrapper(base_env, n_agents)
+    check_env_specs(env)
     
     # Test basic functionality
-    # test_environment(env)
+    test_environment(env)
+    
+    # Test with benchmarl
     test_env_using_benchmarl()
