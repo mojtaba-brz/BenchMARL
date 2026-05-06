@@ -69,10 +69,10 @@ class GridWorldCPPClass(TaskClass):
         def env_fun():
             # Create base gym environment
             base_env = GridSprayEnv(
-                render=False,  # Disable rendering for training
+                render=True,
                 state_fn=config['state_fn'],
                 grid_size=config['grid_size'],
-                num_agents=config['n_agents'],  # Use n_agents
+                num_agents=config['n_agents'],
                 spray_capacity=config['spray_capacity'],
                 max_steps=config['max_steps'],
                 coverage_size=config['coverage_size'],
@@ -140,8 +140,8 @@ class GridWorldCPPClass(TaskClass):
 
     def max_steps(self, env: EnvBase) -> int:
         """Return the maximum number of steps"""
-        return env.base_env.max_steps
+        return env.max_steps
 
     def has_render(self, env: EnvBase) -> bool:
         """Return whether the environment can render"""
-        return env.base_env.has_render
+        return env.has_render

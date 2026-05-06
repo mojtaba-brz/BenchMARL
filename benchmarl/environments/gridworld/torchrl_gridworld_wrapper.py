@@ -17,7 +17,7 @@ class TorchRLGridWorldWrapper(EnvBase):
     """TorchRL wrapper for a general GridWorldEnv"""    
     def __init__(
         self,
-        base_env: gym.Env,
+        base_env,
         n_agents: int,
         device: str = "cpu",
         seed: Optional[int] = None
@@ -158,6 +158,9 @@ class TorchRLGridWorldWrapper(EnvBase):
         if seed is not None:
             torch.manual_seed(seed)
             np.random.seed(seed)
+            
+    def render(self, mode:str|None = None):
+        return self.base_env.render(mode=mode)
     
     # Additional required properties for BenchMARL
     @property
@@ -168,7 +171,7 @@ class TorchRLGridWorldWrapper(EnvBase):
     @property
     def has_render(self) -> bool:
         """Return whether the environment has rendering"""
-        return False
+        return self.base_env.render_enabled
     
     @property
     def max_steps(self) -> int:
